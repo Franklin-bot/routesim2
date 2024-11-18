@@ -13,6 +13,7 @@ class Link_State_Node(Node):
         # destination, next hop
         self.routing_table = {}
         self.nodes = set()
+        self.paths = {}
 
     def link_update(self, link, latency):
         link = frozenset(link)
@@ -57,21 +58,20 @@ class Link_State_Node(Node):
         self.nodes.add(self.id)
 
         if neighbor not in self.nodes:
-            print(f"New node detected by Node {self.id}")
+            #print(f"New node detected by Node {self.id}")
             self.nodes.add(neighbor)
 
             encoded_graph = self.encode_graph()
             state_update = {'type':'state', 'sender':self.id, 'state': encoded_graph}
             su = json.dumps(state_update)
-            print(f"Sent state update to Node {neighbor}")
+            #print(f"Sent state update to Node {neighbor}")
             self.send_to_neighbor(neighbor, su)
 
         link_update = {'type':'link', 'sender':self.id, 'link':list(link), 'latency':latency, 'seq_num':self.graph[link][1]}
         lu = json.dumps(link_update)
         self.send_to_neighbors(lu)
 
-        self.update_routing_table()
-        print(f"Simulation updated link between {self.id} and {neighbor} to {latency}")
+        #print(f"Simulation updated link between {self.id} and {neighbor} to {latency}")
         #self.print_status()
 
     # Fill in this function
@@ -79,12 +79,12 @@ class Link_State_Node(Node):
 
         message = json.loads(m)
         sender = message['sender']
-        print(f"MESSAGE RECIEVED\n type: {message['type']}\n by: {self.id} \n from: {sender}")
+        #print(f"MESSAGE RECIEVED\n type: {message['type']}\n by: {self.id} \n from: {sender}")
 
         # handle state message
         if message['type'] == 'state':
             updated = False
-            print(f"State update recieved by Node {self.id} from Node {sender}")
+            #print(f"State update recieved by Node {self.id} from Node {sender}")
             graph = self.decode_graph(message['state'])
             for link, state in graph.items():
                 link = frozenset(link)
@@ -95,8 +95,8 @@ class Link_State_Node(Node):
                     self.graph[link] = state
                     updated = True
             if updated: self.send_to_neighbors(m)
-            print(f"State of Node {self.id} updated!")
-            self.print_status()
+            #print(f"State of Node {self.id} updated!")
+            #self.print_status()
 
         # handle link message
         elif message['type'] == 'link':
@@ -104,7 +104,7 @@ class Link_State_Node(Node):
             latency = message['latency']
             seq_num = message['seq_num']
 
-            print(f"Node {self.id} received update that link {link} latency was updated to {latency}")
+            #print(f"Node {self.id} received update that link {link} latency was updated to {latency}")
 
             link_update = {'type':'link', 'sender':self.id, 'link':list(link), 'latency':latency, 'seq_num':seq_num}
             lu = json.dumps(link_update)
@@ -116,20 +116,10 @@ class Link_State_Node(Node):
                 self.send_to_neighbors(lu)
             elif self.graph[link][1] > seq_num:
                 self.send_to_neighbor(sender, json.dumps({'type': 'link', 'sender':self.id, 'link':list(link), 'latency':self.graph[link][0], 'seq_num':self.graph[link][1]}))
-                print(f"Node {self.id} received update that link {link} latency was updated to {latency}")
-            self.update_routing_table()
+                #print(f"Node {self.id} received update that link {link} latency was updated to {latency}")
         #self.print_status()
 
-    # Return a neighbor, -1 if no path to destination
     def get_next_hop(self, destination):
-        if destination not in self.routing_table:
-            print(f"ERROR: Destination Node {destination} not in Node {self.id} routing table")
-            self.print_status()
-        else:
-            return self.routing_table[destination]
-
-
-    def update_routing_table(self):
 
         neighbors = {}
         for link, state in self.graph.items():
@@ -150,21 +140,20 @@ class Link_State_Node(Node):
             curr_cost, curr_node = heapq.heappop(heap)
 
             for link in neighbors[curr_node]:
-                neighbor = link[0]
-                latency = link[1]
+                neighbor, latency = link
+                if latency == -1:
+                    continue
                 cost = curr_cost + latency
 
                 if cost < costs[neighbor]:
                     costs[neighbor] = cost
                     predecessor[neighbor] = curr_node
                     heapq.heappush(heap, (cost, neighbor))
+        if costs[destination] == float('inf'):
+            return -1
 
-        for node, cost in costs.items():
-            if node == self.id or cost == float('inf'):
-                self.routing_table[node] = -1
-                continue
             
-            prev = node
-            while (predecessor[prev] != self.id and predecessor[prev] != -1):
-                prev = predecessor[prev]
-            self.routing_table[node] = prev if predecessor[prev] == self.id else -1
+        prev = destination
+        while (predecessor[prev] != self.id and predecessor[prev] != -1):
+            prev = predecessor[prev]
+        return prev if predecessor[prev] == self.id else -1
