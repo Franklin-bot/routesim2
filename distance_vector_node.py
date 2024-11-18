@@ -20,15 +20,25 @@ class Distance_Vector_Node(Node):
         # This node's sequence number 
         self.seq_num = 0
 
+        # A set of all destinations the node has seen and has been sent
+        self.destinations = set()
+
     # Return a string
     def __str__(self):
         status = f"Node Id: {self.id}, Num Entries: {len(self.DV)}\n"
+        # status += "Destinations:\n"
+        # for destination in self.destinations:
+        #     status += f"{destination}\n"
         for destination, data in self.DV.items():
             status += (f"type {type(destination)}, {destination} : [{data[0]}, {data[1]} {data[2]}]\n")
-        status += "Neighbors: \n"
-        for neighbor, cost in self.neighbors.items(): 
-            status += (f"{neighbor} : {cost}\n")
-        
+        # status += "Neighbors: \n"
+        # for neighbor, cost in self.neighbors.items(): 
+        #     status += (f"{neighbor} : {cost}\n")
+        # status += "DVs Stored: \n"
+        for neighbor, DV in self.DVs_received.items():
+            status += f"Neighbor: {neighbor}\n"
+            for destination, arr in DV.items():
+                status += f"destination: {destination}, cost: {arr[0]}, AS_Path: {arr[1]}\n" 
         return status
     
     def send_updated_dv_to_neighbors(self):
@@ -40,51 +50,97 @@ class Distance_Vector_Node(Node):
         message = json.dumps(message_dic)
 
         self.send_to_neighbors(message)
+
+    def compare_dv_tables(self, dv1, dv2):
+        if dv1.keys() != dv2.keys():
+            return False
+        
+        for key in dv1:
+            value1 = dv1[key]
+            value2 = dv2[key]
+
+            if value1[0] != value2[0]:  
+                return False
+            if value1[1] != value2[1]:
+                return False
+            if value1[2] != value2[2]:
+                return False
+        return True
     
     def recalculate_dv(self):
-        DV_changed = False
+        new_DV = {self.id: [0, [], self.id]}
 
-        for destination in self.DV: 
-            destination = int(destination)
+        # Find the shortest path to my neighbors. Could be direct, or through another neighbor
+        for neighbor, neighbor_cost in self.neighbors.items():
+            curr_cost_to_neighbor = neighbor_cost
+            curr_AS_Path = [neighbor]
+            curr_next_hop = neighbor
 
-            current_cost_to_dest = float('inf')
-
-            for neighbor, DV_received in self.DVs_received.items():
-                neighbor_cost = self.neighbors[neighbor]
-                temp_cost_to_dest = float('inf')
+            # loop through the neighbors 
+            for other_neighbor, other_neighbor_cost in self.neighbors.items():
+                temp_cost_to_neighbor = float('inf')
                 temp_AS_Path = []
 
-                if destination in DV_received:
-                    temp_cost_to_dest = neighbor_cost + DV_received[destination][0]
-                    temp_AS_Path = DV_received[destination][1]
+                if other_neighbor in self.DVs_received and neighbor in self.DVs_received[other_neighbor]:
+                    temp_cost_to_neighbor = other_neighbor_cost + self.DVs_received[other_neighbor][neighbor][0]
+                    temp_AS_Path = self.DVs_received[other_neighbor][neighbor][1]
+
+                    if temp_cost_to_neighbor < curr_cost_to_neighbor and other_neighbor not in temp_AS_Path: 
+                        curr_cost_to_neighbor = temp_cost_to_neighbor
+                        curr_AS_Path = copy.deepcopy(temp_AS_Path)
+                        curr_AS_Path.insert(0, other_neighbor)
+                        curr_next_hop = other_neighbor
+            new_DV[neighbor] = [curr_cost_to_neighbor, curr_AS_Path, curr_next_hop]
+
+        for destination in self.destinations.difference(set(self.neighbors)): 
+            current_cost_to_dest = float('inf')
+            AS_Path = []
+            next_hop = None
+
+            for neighbor, neighbor_cost in self.neighbors.items():
+                temp_cost_to_dest = float('inf')
+                temp_AS_Path = []
+                if neighbor in self.DVs_received: 
+                    if destination in self.DVs_received[neighbor]:
+                        temp_cost_to_dest = neighbor_cost + self.DVs_received[neighbor][destination][0]
+                        temp_AS_Path = self.DVs_received[neighbor][destination][1]
 
                 # update our DV if going through the neighbor is cheaper and if we don't exist in their AS_Path to (prevent loops)
                 if temp_cost_to_dest < current_cost_to_dest and self.id not in temp_AS_Path: 
                     current_cost_to_dest = temp_cost_to_dest
-                    new_AS_Path = copy.deepcopy(temp_AS_Path)
-                    new_AS_Path.insert(0, neighbor)
+                    AS_Path = copy.deepcopy(temp_AS_Path)
+                    AS_Path.insert(0, neighbor)
+                    next_hop = neighbor
 
-                    self.DV[destination] = [temp_cost_to_dest, new_AS_Path, neighbor]
-                    DV_changed = True
-        return DV_changed
+                    new_DV[destination] = [current_cost_to_dest, AS_Path, next_hop]
+
+        if self.compare_dv_tables(self.DV, new_DV):
+            return False
+        
+        self.DV = new_DV
+        return True
 
     # Fill in this function
     def link_has_been_updated(self, neighbor, latency):
         # latency == -1 if delete a link
+        self.destinations.add(neighbor)
         if latency == -1: 
             del self.neighbors[neighbor]
+            if neighbor in self.DVs_received:
+                del self.DVs_received[neighbor]
+                del self.messages_received[neighbor]
             del self.DV[neighbor]
-            del self.messages_received[neighbor]
-            del self.DVs_received[neighbor]
+            self.destinations.remove(neighbor)
+            self.recalculate_dv()
         # neighbor exists in DV and it's information may need to be updated
         elif neighbor in self.DV: 
             self.neighbors[neighbor] = latency 
+            self.recalculate_dv()
         # neighbor doesn't exist in DV and it's information should be added to the DV and propagated
         else: 
             self.neighbors[neighbor] = latency 
             self.DV[neighbor] = [latency, [neighbor], neighbor]
         
-        self.recalculate_dv()
         self.send_updated_dv_to_neighbors()
 
     # Fill in this function
@@ -97,38 +153,21 @@ class Distance_Vector_Node(Node):
         seq_num = message['seq_num']
         received_DV = message['DV']
 
-        print(f"message to {self.id} received from {sender}")
-        print(received_DV)
-
         # new message from my neighbor or seq_num of message is greater than the one we have, so we should consider it
         if (sender not in self.messages_received or seq_num > self.messages_received[sender]) and sender in self.neighbors: 
-            print("considered")
             self.messages_received[sender] = seq_num
             self.DVs_received[sender] = {int(k): v for k, v in received_DV.items()}
 
-            # loop through DV from neighbor
-            for destination, arr in received_DV.items(): 
+            # loop through DV from neighbor and add all possible new destinations
+            for destination in received_DV: 
                 destination = int(destination)
-                cost, AS_Path, next_hop = arr
+                self.destinations.add(destination)
 
-                temp_cost_to_dest = cost + self.neighbors[sender]
-                current_cost_to_dest = float('inf')
-                if destination in self.DV:
-                    current_cost_to_dest = self.DV[destination][0]
-
-                # update our DV if going through the neighbor is cheaper and if we don't exist in their AS_Path to (prevent loops)
-                if temp_cost_to_dest < current_cost_to_dest and self.id not in AS_Path: 
-                    new_AS_Path = copy.deepcopy(AS_Path)
-                    new_AS_Path.insert(0, sender)
-
-                    self.DV[destination] = [temp_cost_to_dest, new_AS_Path, sender]
-                    DV_changed = True
-
+            DV_changed = self.recalculate_dv()
         # propogate changed DV
         if DV_changed: 
-            print("change propogated")
             self.send_updated_dv_to_neighbors()
-        
+
 
     # Return a neighbor, -1 if no path to destination
     def get_next_hop(self, destination):
