@@ -1,7 +1,7 @@
-from warnings import warn
 from simulator.node import Node
 import json
 import copy
+
 
 class Distance_Vector_Node(Node):
     def __init__(self, id):
@@ -22,29 +22,6 @@ class Distance_Vector_Node(Node):
 
         # A set of all destinations the node has seen and has been sent
         self.destinations = set()
-
-        self.seq_num = 1
-        # Destination, [cost, path]
-        self.DV = {}
-        # neighbor, {Destination, [cost, path]}
-        self.neighbor_DV = {}
-        # neighbor, latency
-        self.neighbors = {}
-        # int
-        self.nodes = set()
-
-
-    def print_status(self):
-        status = f"NODE {self.id}\n";
-        status += "DV:\n";
-        for destination, (cost, path) in self.DV.items():
-            status += f"Destination: {destination}, Cost: {cost}, Path: {path}\n"
-        status += "Routing Table:\n"
-
-    def send_update(self):
-        message = {'sender': self.id, 'dv': self.DV, 'seq_num': self.seq_num}
-        m = json.dumps(message)
-        self.send_to_neighbors(m)
 
     # Return a string
     def __str__(self):
