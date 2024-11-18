@@ -66,34 +66,26 @@ class Distance_Vector_Node(Node):
 
                     self.DV[destination] = [temp_cost_to_dest, new_AS_Path, neighbor]
                     DV_changed = True
-                    
         return DV_changed
 
     # Fill in this function
     def link_has_been_updated(self, neighbor, latency):
-        DV_changed = False
-
         # latency == -1 if delete a link
         if latency == -1: 
-            DV_changed = True
             del self.neighbors[neighbor]
             del self.DV[neighbor]
             del self.messages_received[neighbor]
             del self.DVs_received[neighbor]
-            DV_changed = self.recalculate_dv()
         # neighbor exists in DV and it's information may need to be updated
         elif neighbor in self.DV: 
-            print(f"{self.id} updated!!!!")
             self.neighbors[neighbor] = latency 
-            DV_changed = self.recalculate_dv()
         # neighbor doesn't exist in DV and it's information should be added to the DV and propagated
         else: 
             self.neighbors[neighbor] = latency 
             self.DV[neighbor] = [latency, [neighbor], neighbor]
-            DV_changed = True
         
-        if DV_changed: 
-            self.send_updated_dv_to_neighbors()
+        self.recalculate_dv()
+        self.send_updated_dv_to_neighbors()
 
     # Fill in this function
     def process_incoming_routing_message(self, m):
@@ -105,9 +97,12 @@ class Distance_Vector_Node(Node):
         seq_num = message['seq_num']
         received_DV = message['DV']
 
+        print(f"message to {self.id} received from {sender}")
+        print(received_DV)
 
         # new message from my neighbor or seq_num of message is greater than the one we have, so we should consider it
         if (sender not in self.messages_received or seq_num > self.messages_received[sender]) and sender in self.neighbors: 
+            print("considered")
             self.messages_received[sender] = seq_num
             self.DVs_received[sender] = {int(k): v for k, v in received_DV.items()}
 
@@ -131,6 +126,7 @@ class Distance_Vector_Node(Node):
 
         # propogate changed DV
         if DV_changed: 
+            print("change propogated")
             self.send_updated_dv_to_neighbors()
         
 
